@@ -1,0 +1,5 @@
+afl
+simple
+*.dSYM/
+.vscode/
+frida.rep/
