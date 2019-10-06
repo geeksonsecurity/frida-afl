@@ -32,6 +32,7 @@ Will only track `libplist` basic blocks.
 * [frida-gum CModule](https://github.com/frida/frida-gum/tree/master/bindings/gumjs/runtime/cmodule)
 * [AFL-Dynamorio](https://github.com/vanhauser-thc/afl-dynamorio) by Vanhauser
 * [AFL forkserver concept](https://lcamtuf.blogspot.com/2014/10/fuzzing-binaries-without-execve.html)
+* [Inside a Mach-O binary](https://adrummond.net/posts/macho)
 
 ## Example Runs
 
