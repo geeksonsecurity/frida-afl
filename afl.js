@@ -83,54 +83,77 @@ function reverse(arr) {
     return result;
 }
 
+// Assignments
 Stalker.trustThreshold = 0;
 // WATCH-OUT: seems like the first module is always the binary main module
 var instrument_all = false;
+var trace_bits = ptr(0);
+var shmat = ptr(0);
+var shmdt = ptr(0);
+// keep track of previous block id
+var prev_id = ptr(0);
+var block_monitored = 0;
+var entrypoint = ptr(0);
+
+const forkserver_module = new CModule(`
+#include <stdio.h>
+
+void
+start (void)
+{
+  printf ("[+] Init forkserver!\\n");
+}
+`);
+
+rpc.exports = {
+    init: function (entrypoint_address) {
+        entrypoint = ptr(entrypoint_address);
+        console.log("[*] Entrypoint address set to", entrypoint);
+        console.log("[+] Instrumentation initialized from python launcher!");
+        return;
+    }
+};
+
 var getenv_export = Module.getExportByName(null, 'getenv');
 if (getenv_export) {
-    console.log("Found export for getenv!");
+    console.log("[*] Found export for getenv!");
     const get_env = new NativeFunction(getenv_export, 'pointer', ['pointer']);
-    console.log("Prepared native function @", get_env);
+    console.log("[*] Prepared native function @", get_env);
     var shm_id = parseInt(Memory.readCString(get_env(Memory.allocUtf8String("__AFL_SHM_ID"))));
-    console.log("Shared memory ID:", parseInt(shm_id));
+    console.log("[*] Shared memory ID:", parseInt(shm_id));
 
     var whitelist_raw = Memory.readCString(get_env(Memory.allocUtf8String("WHITELIST")));
     if (whitelist_raw) {
         var whitelist = whitelist_raw.split(",").map(function (item) {
             return item.trim();
         });
-        console.log("Whitelist: ", whitelist);
-        if(whitelist.indexOf("all") > -1){
-            console.log("Covering all modules!");
+        console.log("[*] Whitelist: ", whitelist);
+        if (whitelist.indexOf("all") > -1) {
+            console.log("[*] Covering all modules!");
             instrument_all = true
         }
     } else {
         var whitelist = [Process.enumerateModules()[0].name];
-        console.log("[!] WHITELIST not available! tracking only main module", whitelist[0]);
+        console.log("[!] WHITELIST env not available! tracking only main module", whitelist[0]);
     }
 
     var shmat_export = Module.getExportByName(null, 'shmat');
     var shmdt_export = Module.getExportByName(null, 'shmdt');
     if (shmat_export && shmdt_export) {
-        const shmat = new NativeFunction(shmat_export, 'pointer', ['int', 'pointer', 'int']);
-        const shmdt = new NativeFunction(shmdt_export, 'int', ['pointer']);
+        shmat = new NativeFunction(shmat_export, 'pointer', ['int', 'pointer', 'int']);
+        shmdt = new NativeFunction(shmdt_export, 'int', ['pointer']);
         if (shm_id > 0) {
-            const trace_bits = shmat(shm_id, ptr(0), 0);
-        } else {
-            const trace_bits = ptr(0);
+            trace_bits = shmat(shm_id, ptr(0), 0);
         }
-        console.log("trace_bits mapped at", trace_bits);
+        console.log("[*] trace_bits mapped at", trace_bits);
     } else {
-        console.log("Unable to resolve shared memory exports!\n");
+        console.log("[!] Unable to resolve shared memory exports!\n");
     }
 
 } else {
-    console.log("Unable to find export for getenv!");
+    console.log("[!] Unable to find export for getenv!");
 }
 
-// keep track of previous block id
-var prev_id = ptr(0);
-var block_monitored = 0;
 Process.enumerateThreads({
     onMatch: function (thread) {
         Stalker.follow(thread.id, {
@@ -143,10 +166,17 @@ Process.enumerateThreads({
                     if (event.type === 'compile' || event.type === 'block') {
                         var block = event;
                         var module = Process.findModuleByAddress(block.begin);
+
+                        if (block.begin.equals(entrypoint)) {
+                            console.log("[+] Entrypoint reached!");
+                            var forkserver_start = new NativeFunction(forkserver_module.start, 'void', []);
+                            forkserver_start();
+                        }
+
                         if (module && (instrument_all || whitelist.indexOf(module.name) > -1)) {
                             //console.log(event.type + ":" + module.name, block.begin);
                             var base = ptr(module.base);
-                            console.log(block.begin + ' -> ' + block.end, "(", module.name, ":", module.base, "-", base.add(module.size), ")");
+                            //console.log(block.begin + ' -> ' + block.end, "(", module.name, ":", module.base, "-", base.add(module.size), ")");
                             block_monitored += 1;
                             if (!trace_bits.isNull()) {
                                 var offset = (prev_id ^ id) & 0xFFFF;
@@ -155,7 +185,7 @@ Process.enumerateThreads({
                                 const current_value = target.readU16()
                                 target.writeU16(current_value + 1);
                                 prev_id = id >> 1;
-                                console.log("map_offset:", offset, "id:", id, "prev_id:", prev_id, ", target:", target, ", current:", current_value);
+                                //console.log("[*] map_offset:", offset, "id:", id, "prev_id:", prev_id, ", target:", target, ", current:", current_value);
                             }
                         }
                     }
@@ -164,14 +194,14 @@ Process.enumerateThreads({
         });
     },
     onComplete: function () {
-        console.log('Done stalking threads.');
+        console.log("[*] Done stalking threads");
     }
 });
 
 Interceptor.attach(Module.getExportByName(null, 'exit'), {
-    onEnter: function(args) {
-        console.log("Monitored", block_monitored, " blocks!");
+    onEnter: function (args) {
+        console.log("[*] Monitored", block_monitored, "blocks!");
         shmdt(trace_bits);
-        console.log("Shared memory unmapped!");
+        console.log("[*] Shared memory unmapped!");
     }
 });

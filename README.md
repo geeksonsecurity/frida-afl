@@ -6,13 +6,13 @@ Use Frida DBI to instrument binary and perform basic-block code coverage that is
 
 `afl.c` simulate AFL by setting up the shared memory (code-coverage map), by running the target binary (`./simple`) via frida instrumentation and by creating a readable memory map file.
 
-The `frida-afl.py` scripts spawn the target process with ASLR disabled, inject and execute the `bb.js` script and wait for the execution to finish. Unfortunately we cant spawn the process without ASLR with the common `frida` CLI tool.
+The `frida-afl.py` scripts spawn the target process with ASLR disabled, inject and execute the `afl.js` script and wait for the execution to finish. Unfortunately we cant spawn the process without ASLR with the common `frida` CLI tool. You need to pass the `--entrypoint 0xDEADBEEF` option to the `frida-afl.py` script in order for the instrumented code to start the forkserver at the right place.
 
 The env-variable `WHITELIST` should be given to the frida client in order to instrument also dynamic libraries used by the target. If none is given only the main module (target binary) will be instrumented. If you use `all` as value every basic block will be instrumented (no matter which module).
 
 For example:
 ```
-WHITELIST="libplist.3.dylib" frida --no-pause -l bb.js -- /usr/local/bin/plistutil -i ../..//Repos/recipe/ios/Runner/Info.plist
+WHITELIST="libplist.3.dylib" frida --no-pause -l afl.js -- /usr/local/bin/plistutil -i ../..//Repos/recipe/ios/Runner/Info.plist
 ```
 Will only track `libplist` basic blocks.
 
@@ -28,6 +28,7 @@ Will only track `libplist` basic blocks.
 
 ## References
 * [Frida Javascript API References](https://www.frida.re/docs/javascript-api/)
+* [Frida CModule explanations](https://www.frida.re/news/2019/09/18/frida-12-7-released/)
 * [AFL-Dynamorio](https://github.com/vanhauser-thc/afl-dynamorio) by Vanhauser
 
 ## Example Runs
