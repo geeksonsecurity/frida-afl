@@ -83,9 +83,10 @@ function reverse(arr) {
     return result;
 }
 
-var main_binary = "simple";
 Stalker.trustThreshold = 0;
-console.log("Processing basic blocks from", main_binary, "only!");
+// WATCH-OUT: seems like the first module is always the binary main module
+var main_module = Process.enumerateModules()[0];
+console.log("Processing basic blocks from", main_module.name, "only!");
 var getenv_export = Module.getExportByName(null, 'getenv');
 if(getenv_export){
     console.log("Found export for getenv!");
@@ -111,11 +112,8 @@ if(getenv_export){
     console.log("Unable to find export for getenv!");
 }
 
-
-// void *trace_bits = shmat(shm_id, NULL, 0);
-
+// keep track of previous block id
 var prev_id = ptr(0);
-
 Process.enumerateThreads({
     onMatch: function (thread) {
         Stalker.follow(thread.id, {
@@ -129,18 +127,17 @@ Process.enumerateThreads({
                     if (event.type === 'compile' || event.type === 'block') {
                         var block = event;
                         var module = Process.findModuleByAddress(block.begin);
-                        if(module && module.name == main_binary){
+                        if(module && module.name == main_module.name){
                             var base = ptr(module.base);
-                            console.log(block.begin + ' -> ' + block.end, "(", module.name, ":", module.base, "-", base.add(module.size), ")");
                             const id = block.begin >> 1;
                             var offset = (prev_id ^ id) & 0xFFFF;
                             var target = trace_bits.add(offset)
                             const current_value = target.readU16()
                             target.writeU16(current_value + 1);
                             prev_id = id >> 1;
+                            console.log(block.begin + ' -> ' + block.end, "(", module.name, ":", module.base, "-", base.add(module.size), ")");
                             console.log("map_offset:", offset, "id:", id, "prev_id:", prev_id, ", target:", target, ", current:", current_value);
                         }
-                      //console.log(event.code + '\n');
                     }
                 });
             }
