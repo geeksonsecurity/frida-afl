@@ -30,6 +30,7 @@ Will only track `libplist` basic blocks.
 * [Frida Javascript API References](https://www.frida.re/docs/javascript-api/)
 * [Frida CModule explanations](https://www.frida.re/news/2019/09/18/frida-12-7-released/)
 * [AFL-Dynamorio](https://github.com/vanhauser-thc/afl-dynamorio) by Vanhauser
+* [AFL forkserver concept](https://lcamtuf.blogspot.com/2014/10/fuzzing-binaries-without-execve.html)
 
 ## Example Runs
 

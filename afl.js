@@ -94,14 +94,71 @@ var shmdt = ptr(0);
 var prev_id = ptr(0);
 var block_monitored = 0;
 var entrypoint = ptr(0);
+// forkserver 
+var have_forkserver = 0;
 
 const forkserver_module = new CModule(`
 #include <stdio.h>
 
+#define FORKSRV_FD          198
+
+static int now_start = 0, loadedlibs = 0, have_forkserver = 0;
+
+extern int fork(void);
+extern int read(int fildes, void *buf, unsigned int nbyte);
+extern int write(int fildes, const void *buf, unsigned int nbyte);
+extern int waitpid(int pid, int *stat_loc, int options);
+extern int close(int fildes);
+
 void
 start (void)
 {
-  printf ("[+] Init forkserver!\\n");
+    unsigned char tmp[4];
+    int child_pid = 0;
+    printf ("[+] Init forkserver!\\n");
+    if (write(FORKSRV_FD + 1, tmp, 4) != 4) {
+        printf ("[!] Error writing fork server to FD %d\\n", FORKSRV_FD);
+        return;
+    }
+
+    while (1) {
+        unsigned int was_killed;
+        int status;
+        printf ("[+] Waiting for mother!\\n");
+        if (read(FORKSRV_FD, &was_killed, 4) != 4) {
+            printf("[!] Error reading fork server\\n");
+            return;
+        }
+        child_pid = fork();
+        if (child_pid < 0) {
+            printf("[!] Error fork\\n");
+            return;
+        }
+
+        if (child_pid == 0) {       // child
+            printf("[!]forkserver(): this is the child\\n");
+            close(FORKSRV_FD);
+            close(FORKSRV_FD + 1);
+            now_start = 1;
+            return;
+        }
+
+        if (write(FORKSRV_FD + 1, &child_pid, 4) != 4) {
+            printf("[!] Error writing fork server (2)\\n");
+            return;
+        }
+        printf("[+] forkserver(): this is the forkserver(main)\\n");
+        if (waitpid(child_pid, &status, 0) < 0) {
+            printf("[!] Error waiting for child\\n");
+            return;
+        }
+
+        if (write(FORKSRV_FD + 1, &status, 4) != 4) {
+            printf("[!] Fork server is gone, terminating\n");
+            return;
+        }
+        printf("[+] forkserver(): child is done\\n");
+    }
 }
 `);
 
@@ -167,10 +224,12 @@ Process.enumerateThreads({
                         var block = event;
                         var module = Process.findModuleByAddress(block.begin);
 
-                        if (block.begin.equals(entrypoint)) {
+                        if (block.begin.equals(entrypoint) && have_forkserver == 0) {
                             console.log("[+] Entrypoint reached!");
                             var forkserver_start = new NativeFunction(forkserver_module.start, 'void', []);
+                            have_forkserver = 1;
                             forkserver_start();
+                            console.log("[+] Forkserver started!");
                         }
 
                         if (module && (instrument_all || whitelist.indexOf(module.name) > -1)) {
@@ -179,8 +238,8 @@ Process.enumerateThreads({
                             //console.log(block.begin + ' -> ' + block.end, "(", module.name, ":", module.base, "-", base.add(module.size), ")");
                             block_monitored += 1;
                             if (!trace_bits.isNull()) {
+                                var id = block.begin >> 1;
                                 var offset = (prev_id ^ id) & 0xFFFF;
-                                const id = block.begin >> 1;
                                 var target = trace_bits.add(offset)
                                 const current_value = target.readU16()
                                 target.writeU16(current_value + 1);
