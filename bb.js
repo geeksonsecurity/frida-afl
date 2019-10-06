@@ -85,13 +85,13 @@ function reverse(arr) {
 
 Stalker.trustThreshold = 0;
 // WATCH-OUT: seems like the first module is always the binary main module
-
+var instrument_all = false;
 var getenv_export = Module.getExportByName(null, 'getenv');
 if (getenv_export) {
     console.log("Found export for getenv!");
     const get_env = new NativeFunction(getenv_export, 'pointer', ['pointer']);
     console.log("Prepared native function @", get_env);
-    var shm_id = parseInt(Memory.readCString(get_env(Memory.allocUtf8String("SHM_ENV_VAR"))));
+    var shm_id = parseInt(Memory.readCString(get_env(Memory.allocUtf8String("__AFL_SHM_ID"))));
     console.log("Shared memory ID:", parseInt(shm_id));
 
     var whitelist_raw = Memory.readCString(get_env(Memory.allocUtf8String("WHITELIST")));
@@ -100,6 +100,10 @@ if (getenv_export) {
             return item.trim();
         });
         console.log("Whitelist: ", whitelist);
+        if(whitelist.indexOf("all") > -1){
+            console.log("Covering all modules!");
+            instrument_all = true
+        }
     } else {
         var whitelist = [Process.enumerateModules()[0].name];
         console.log("[!] WHITELIST not available! tracking only main module", whitelist[0]);
@@ -139,7 +143,8 @@ Process.enumerateThreads({
                     if (event.type === 'compile' || event.type === 'block') {
                         var block = event;
                         var module = Process.findModuleByAddress(block.begin);
-                        if (module && whitelist.indexOf(module.name) > -1) {
+                        if (module && (instrument_all || whitelist.indexOf(module.name) > -1)) {
+                            //console.log(event.type + ":" + module.name, block.begin);
                             var base = ptr(module.base);
                             console.log(block.begin + ' -> ' + block.end, "(", module.name, ":", module.base, "-", base.add(module.size), ")");
                             block_monitored += 1;
