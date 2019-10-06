@@ -27,7 +27,8 @@ int main(int argc, char *argv[])
     char *cmd = "simple";
     printf("Executing %s\n", cmd);
 
-    int res = system("frida --no-pause -l bb.js ./simple");
+    int res = system("./frida-afl.py ./simple");
+    //int res = system("frida --no-pause -l bb.js -- /usr/local/bin/plistutil -i ../..//Repos/recipe/ios/Runner/Info.plist");
     printf("Execution result: %d\n", res);
 
     FILE* f = fopen("map.txt", "w");

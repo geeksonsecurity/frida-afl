@@ -85,24 +85,36 @@ function reverse(arr) {
 
 Stalker.trustThreshold = 0;
 // WATCH-OUT: seems like the first module is always the binary main module
-var main_module = Process.enumerateModules()[0];
-console.log("Processing basic blocks from", main_module.name, "only!");
+
 var getenv_export = Module.getExportByName(null, 'getenv');
-if(getenv_export){
+if (getenv_export) {
     console.log("Found export for getenv!");
-    var shm_env_name = Memory.allocUtf8String("SHM_ENV_VAR");
     const get_env = new NativeFunction(getenv_export, 'pointer', ['pointer']);
-    console.log("Allocated env name SHM_ENV_VAR", shm_env_name, ", native function", get_env);
-    var shm_id = Memory.readCString(get_env(shm_env_name));
+    console.log("Prepared native function @", get_env);
+    var shm_id = parseInt(Memory.readCString(get_env(Memory.allocUtf8String("SHM_ENV_VAR"))));
     console.log("Shared memory ID:", parseInt(shm_id));
+
+    var whitelist_raw = Memory.readCString(get_env(Memory.allocUtf8String("WHITELIST")));
+    if (whitelist_raw) {
+        var whitelist = whitelist_raw.split(",").map(function (item) {
+            return item.trim();
+        });
+        console.log("Whitelist: ", whitelist);
+    } else {
+        var whitelist = [Process.enumerateModules()[0].name];
+        console.log("[!] WHITELIST not available! tracking only main module", whitelist[0]);
+    }
 
     var shmat_export = Module.getExportByName(null, 'shmat');
     var shmdt_export = Module.getExportByName(null, 'shmdt');
-    if(shmat_export && shmdt_export){
+    if (shmat_export && shmdt_export) {
         const shmat = new NativeFunction(shmat_export, 'pointer', ['int', 'pointer', 'int']);
         const shmdt = new NativeFunction(shmdt_export, 'int', ['pointer']);
-
-        const trace_bits = shmat(parseInt(shm_id), ptr(0), 0);
+        if (shm_id > 0) {
+            const trace_bits = shmat(shm_id, ptr(0), 0);
+        } else {
+            const trace_bits = ptr(0);
+        }
         console.log("trace_bits mapped at", trace_bits);
     } else {
         console.log("Unable to resolve shared memory exports!\n");
@@ -114,6 +126,7 @@ if(getenv_export){
 
 // keep track of previous block id
 var prev_id = ptr(0);
+var block_monitored = 0;
 Process.enumerateThreads({
     onMatch: function (thread) {
         Stalker.follow(thread.id, {
@@ -122,30 +135,38 @@ Process.enumerateThreads({
                 block: false //block executed
             },
             onReceive: function (events) {
-                //console.log(Stalker.parse(event));
                 parseEvents(events, function (event) {
                     if (event.type === 'compile' || event.type === 'block') {
                         var block = event;
                         var module = Process.findModuleByAddress(block.begin);
-                        if(module && module.name == main_module.name){
+                        if (module && whitelist.indexOf(module.name) > -1) {
                             var base = ptr(module.base);
-                            const id = block.begin >> 1;
-                            var offset = (prev_id ^ id) & 0xFFFF;
-                            var target = trace_bits.add(offset)
-                            const current_value = target.readU16()
-                            target.writeU16(current_value + 1);
-                            prev_id = id >> 1;
                             console.log(block.begin + ' -> ' + block.end, "(", module.name, ":", module.base, "-", base.add(module.size), ")");
-                            console.log("map_offset:", offset, "id:", id, "prev_id:", prev_id, ", target:", target, ", current:", current_value);
+                            block_monitored += 1;
+                            if (!trace_bits.isNull()) {
+                                var offset = (prev_id ^ id) & 0xFFFF;
+                                const id = block.begin >> 1;
+                                var target = trace_bits.add(offset)
+                                const current_value = target.readU16()
+                                target.writeU16(current_value + 1);
+                                prev_id = id >> 1;
+                                console.log("map_offset:", offset, "id:", id, "prev_id:", prev_id, ", target:", target, ", current:", current_value);
+                            }
                         }
                     }
                 });
             }
         });
     },
-    onComplete: function () { 
-        console.log('Done stalking threads.'); 
-        //shmdt(trace_bits);
-        //console.log("Shared memory unmapped!");
+    onComplete: function () {
+        console.log('Done stalking threads.');
+    }
+});
+
+Interceptor.attach(Module.getExportByName(null, 'exit'), {
+    onEnter: function(args) {
+        console.log("Monitored", block_monitored, " blocks!");
+        shmdt(trace_bits);
+        console.log("Shared memory unmapped!");
     }
 });
