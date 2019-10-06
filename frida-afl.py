@@ -4,6 +4,7 @@ import frida
 import sys
 import time
 import threading
+import os
 
 finished = threading.Event()
 
@@ -15,6 +16,8 @@ def exiting():
     print("Exiting!")
 
 def main(target_binary):
+    shm_var = os.getenv("__AFL_SHM_ID")
+    print("__AFL_SHM_ID is {}".format(shm_var))
     print("Spawning {} ".format(" ".join(target_binary)))
     pid = frida.spawn(target_binary, aslr="disable")
     session = frida.attach(pid)
