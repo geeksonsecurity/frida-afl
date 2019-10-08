@@ -4,7 +4,7 @@
 
 Use Frida DBI to instrument binary and perform basic-block code coverage that is fed back to AFL.
 
-`afl.c` simulate AFL by setting up the shared memory (code-coverage map), by running the target binary (`./simple`) via frida instrumentation and by creating a readable memory map file.
+`aflmock.c` simulate AFL by setting up the shared memory (code-coverage map), by faking the control pipes like AFL does, by running the target binary via `execv` and by creating a readable memory map file once the execution is finished.
 
 The `frida-afl.py` scripts spawn the target process with ASLR disabled, inject and execute the `afl.js` script and wait for the execution to finish. Unfortunately we cant spawn the process without ASLR with the common `frida` CLI tool. You need to pass the `--entrypoint 0xDEADBEEF` option to the `frida-afl.py` script in order for the instrumented code to start the forkserver at the right place.
 
@@ -19,6 +19,7 @@ Will only track `libplist` basic blocks.
 ## ToDo's
 * ✓ whitelist modules by name
 * ✓ spawned process should have ASLR disabled 
+* Patch frida to remove the `POSIX_SPAWN_CLOEXEC_DEFAULT` flag when spawning the target binary
 * Add log to file facility to frida
 * Verify that crashes are actually detected on Mac OS X
 * Improve how the base module is being detected (currently just take the first item from the array of the process's modules)
@@ -33,7 +34,7 @@ Will only track `libplist` basic blocks.
 * [AFL-Dynamorio](https://github.com/vanhauser-thc/afl-dynamorio) by Vanhauser
 * [AFL forkserver concept](https://lcamtuf.blogspot.com/2014/10/fuzzing-binaries-without-execve.html)
 * [Inside a Mach-O binary](https://adrummond.net/posts/macho)
-
+* [posix_spawn part for Mac OS X](https://github.com/frida/frida-core/blob/5328de88a29222559fb2883be54ccae3b705a8b6/src/darwin/frida-helper-backend-glue.m)
 ## Example Runs
 
 ### afl mock
