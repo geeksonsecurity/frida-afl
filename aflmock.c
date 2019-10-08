@@ -26,7 +26,7 @@ int main(int argc, char *argv[])
   }
   char shm_str[1024];
   sprintf(shm_str, "%d", shm_id);
-  setenv("SHM_ENV_VAR", shm_str, 1);
+  setenv("__AFL_SHM_ID", shm_str, 1);
   unsigned char *trace_bits = shmat(shm_id, NULL, 0);
   printf("Set shm %s mapped to %p\n", shm_str, trace_bits);
 
