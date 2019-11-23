@@ -1,4 +1,14 @@
 
+const logfile = new File("afl.log", "a+");
+
+function debug(msg) {
+    var args = Array.prototype.slice.call(arguments);
+    console.log.apply(console, args);
+    logfile.write(args.join(" "));
+    logfile.write("\n");
+    logfile.flush();
+}
+
 var threads = {};
 
 var EV_TYPE_BLOCK = 8;
@@ -19,7 +29,7 @@ function parseEvents(blob, callback) {
                 callback(parseCompileEvent(blob, i));
                 break;
             default:
-                console.log('Unsupported type ' + type);
+                debug('Unsupported type ' + type);
                 break;
         }
     }
@@ -90,6 +100,7 @@ var instrument_all = false;
 var trace_bits = ptr(0);
 var shmat = ptr(0);
 var shmdt = ptr(0);
+var getpid = ptr(0);
 // keep track of previous block id
 var prev_id = ptr(0);
 var block_monitored = 0;
@@ -97,101 +108,163 @@ var entrypoint = ptr(0);
 // forkserver 
 var have_forkserver = 0;
 
+rpc.exports = {
+    init: function (entrypoint_address) {
+        entrypoint = ptr(entrypoint_address);
+        debug("[*] Entrypoint address set to", entrypoint);
+        debug("[+] Instrumentation initialized from python launcher!");
+        return;
+    }
+};
+
+const forkstarted = Memory.alloc(4);
 const forkserver_module = new CModule(`
 #include <stdio.h>
 
 #define FORKSRV_FD          198
+#define	F_GETFL		3		/* get file status flags */
 
-static int now_start = 0, loadedlibs = 0, have_forkserver = 0;
 
 extern int fork(void);
 extern int read(int fildes, void *buf, unsigned int nbyte);
 extern int write(int fildes, const void *buf, unsigned int nbyte);
 extern int waitpid(int pid, int *stat_loc, int options);
 extern int close(int fildes);
+extern int fcntl(int fildes, int cmd, ...);
+int getpid(void);
+// logging
+FILE *fopen(const char * restrict path, const char * restrict mode);
+int fclose(FILE *stream);
+int fflush(FILE *stream);
+extern int errno;
+extern volatile int forkstarted;
 
 void
 start (void)
-{
-    unsigned char tmp[4];
+{  
+    FILE *log = fopen("fork.log", "a+");
+    unsigned char tmp[4] = {};
     int child_pid = 0;
-    printf ("[+] Init forkserver!\\n");
+    fprintf(log, "[+] Init forkserver PID %d!\\n", getpid());
+
+    if (fcntl(FORKSRV_FD, F_GETFL) == -1 || fcntl(FORKSRV_FD + 1, F_GETFL) == -1){
+        fprintf(log, "[!] AFL fork server file descriptors are not open, errno %d\\n", errno);
+        goto getout;
+    } else {
+        fprintf(log, "[*] FDs ready!\\n");
+    }
+
     if (write(FORKSRV_FD + 1, tmp, 4) != 4) {
-        printf ("[!] Error writing fork server to FD %d\\n", FORKSRV_FD);
-        return;
+        fprintf(log, "[!] Error writing fork server to FD %d, errno %d\\n", FORKSRV_FD + 1, errno);
+        goto getout;
+    } else {
+        fprintf(log, "[*] write (1)!\\n");
     }
 
     while (1) {
         unsigned int was_killed;
         int status;
-        printf ("[+] Waiting for mother!\\n");
+        fprintf(log, "[+] Waiting for mother!\\n");
         if (read(FORKSRV_FD, &was_killed, 4) != 4) {
-            printf("[!] Error reading fork server\\n");
-            return;
-        }
+            fprintf(log, "[!] Error reading fork server\\n");
+            goto getout;
+        } else {
+            fprintf(log, "[*] Read!\\n");
+        } 
+
         child_pid = fork();
         if (child_pid < 0) {
-            printf("[!] Error fork\\n");
-            return;
+            fprintf(log, "[!] Error fork\\n");
+            goto getout;
+        } else {
+            fprintf(log, "[*] Forked PID %d!\\n", child_pid);
         }
 
         if (child_pid == 0) {       // child
-            printf("[!]forkserver(): this is the child\\n");
+            fprintf(log, "[+] forkserver(): this is the child\\n");
             close(FORKSRV_FD);
             close(FORKSRV_FD + 1);
-            now_start = 1;
-            return;
-        }
+            forkstarted = 1;
+            goto getout;
+        } 
 
         if (write(FORKSRV_FD + 1, &child_pid, 4) != 4) {
-            printf("[!] Error writing fork server (2)\\n");
-            return;
+            fprintf(log, "[!] Error writing child pid to fork server (2)\\n");
+            goto getout;
+        } else {
+            fprintf(log, "[*] Wrote child pid %d!\\n", child_pid);
         }
-        printf("[+] forkserver(): this is the forkserver(main)\\n");
+
+        fprintf(log, "[+] this is the forkserver(main) waiting for child %d\\n", child_pid);
         if (waitpid(child_pid, &status, 0) < 0) {
-            printf("[!] Error waiting for child\\n");
-            return;
+            fprintf(log, "[!] Error waiting for child\\n");
+            goto getout;
+        } else {
+            fprintf(log, "[*] Waitpid!\\n");
         }
 
         if (write(FORKSRV_FD + 1, &status, 4) != 4) {
-            printf("[!] Fork server is gone, terminating\n");
-            return;
+            fprintf(log, "[!] Fork server is gone before status submission, terminating\\n");
+            goto getout;
+        } else {
+            fprintf(log, "[*] wrote status %d!\\n", status);
         }
-        printf("[+] forkserver(): child is done\\n");
+        fprintf(log, "[+] forkserver(): child is done\\n");
+        fflush(log);
     }
-}
-`);
-
-rpc.exports = {
-    init: function (entrypoint_address) {
-        entrypoint = ptr(entrypoint_address);
-        console.log("[*] Entrypoint address set to", entrypoint);
-        console.log("[+] Instrumentation initialized from python launcher!");
+    getout:
+        fflush(log);
         return;
+}`, { forkstarted });
+
+/*
+// Check if one AFL FD is accessible
+var fcntl_export = Module.getExportByName(null, 'fcntl');
+if (fcntl_export) {
+    const fcntl = new NativeFunction(fcntl_export, 'int', ['int', 'int', '...']);
+    var res = fcntl(198, 3);
+    if (res > -1) {
+        debug('FD 198 is readable');
+    } else {
+        debug('FD 198 is NOT readable');
     }
-};
+} else {
+    debug("Unable to resolve fcntl!");
+}
+*/
+
 
 var getenv_export = Module.getExportByName(null, 'getenv');
 if (getenv_export) {
-    console.log("[*] Found export for getenv!");
+    debug("[*] Found export for getenv!");
     const get_env = new NativeFunction(getenv_export, 'pointer', ['pointer']);
-    console.log("[*] Prepared native function @", get_env);
+    debug("[*] Prepared native function @", get_env);
     var shm_id = parseInt(Memory.readCString(get_env(Memory.allocUtf8String("__AFL_SHM_ID"))));
-    console.log("[*] Shared memory ID:", parseInt(shm_id));
+    debug("[*] Shared memory ID:", shm_id);
+
+    var forkserver_enabled = parseInt(Memory.readCString(get_env(Memory.allocUtf8String("AFL_NO_FORKSRV")))) != 1;
+    debug("[*] Forkserver enabled:", forkserver_enabled);
 
     var whitelist_raw = Memory.readCString(get_env(Memory.allocUtf8String("WHITELIST")));
     if (whitelist_raw) {
         var whitelist = whitelist_raw.split(",").map(function (item) {
             return item.trim();
         });
-        console.log("[*] Whitelist: ", whitelist);
+        debug("[*] Whitelist: ", whitelist);
         if (whitelist.indexOf("all") > -1) {
-            console.log("[*] Covering all modules!");
+            debug("[*] Covering all modules!");
             instrument_all = true
         }
     } else {
         var whitelist = [Process.enumerateModules()[0].name];
-        console.log("[!] WHITELIST env not available! tracking only main module", whitelist[0]);
+        debug("[!] WHITELIST env not available! tracking only main module", whitelist[0]);
+    }
+
+    
+    var getpid_export = Module.getExportByName(null, 'getpid');
+    if (getpid_export) {
+        getpid = new NativeFunction(getpid_export, 'int', []);
+        debug("[*] getpid() found");
     }
 
     var shmat_export = Module.getExportByName(null, 'shmat');
@@ -202,13 +275,13 @@ if (getenv_export) {
         if (shm_id > 0) {
             trace_bits = shmat(shm_id, ptr(0), 0);
         }
-        console.log("[*] trace_bits mapped at", trace_bits);
+        debug("[*] trace_bits mapped at", trace_bits);
     } else {
-        console.log("[!] Unable to resolve shared memory exports!\n");
+        debug("[!] Unable to resolve shared memory exports!\n");
     }
 
 } else {
-    console.log("[!] Unable to find export for getenv!");
+    debug("[!] Unable to find export for getenv!");
 }
 
 Process.enumerateThreads({
@@ -224,27 +297,30 @@ Process.enumerateThreads({
                         var block = event;
                         var module = Process.findModuleByAddress(block.begin);
 
-                        if (block.begin.equals(entrypoint) && have_forkserver == 0) {
-                            console.log("[+] Entrypoint reached!");
-                            var forkserver_start = new NativeFunction(forkserver_module.start, 'void', []);
-                            have_forkserver = 1;
-                            forkserver_start();
-                            console.log("[+] Forkserver started!");
-                        }
-
-                        if (module && (instrument_all || whitelist.indexOf(module.name) > -1)) {
-                            //console.log(event.type + ":" + module.name, block.begin);
-                            var base = ptr(module.base);
-                            //console.log(block.begin + ' -> ' + block.end, "(", module.name, ":", module.base, "-", base.add(module.size), ")");
-                            block_monitored += 1;
-                            if (!trace_bits.isNull()) {
-                                var id = block.begin >> 1;
-                                var offset = (prev_id ^ id) & 0xFFFF;
-                                var target = trace_bits.add(offset)
-                                const current_value = target.readU16()
-                                target.writeU16(current_value + 1);
-                                prev_id = id >> 1;
-                                //console.log("[*] map_offset:", offset, "id:", id, "prev_id:", prev_id, ", target:", target, ", current:", current_value);
+                        if (forkserver_enabled && forkstarted.readInt() == 0) {
+                            if (block.begin.equals(entrypoint) && have_forkserver == 0) {
+                                debug("[+] Entrypoint reached!");
+                                var forkserver_start = new NativeFunction(forkserver_module.start, 'void', []);
+                                debug("[+] Forkserver about to start... PID", getpid(), ", flag is ", forkstarted.readInt());
+                                have_forkserver = 1;
+                                forkserver_start();
+                                debug("[+] Forkserver started! PID", getpid(), ", flag is ", forkstarted.readInt());
+                            }
+                        } else {
+                            if (module && (instrument_all || whitelist.indexOf(module.name) > -1)) {
+                                //debug(event.type + ":" + module.name, block.begin);
+                                var base = ptr(module.base);
+                                //debug(block.begin + ' -> ' + block.end, "(", module.name, ":", module.base, "-", base.add(module.size), ")");
+                                block_monitored += 1;
+                                if (!trace_bits.isNull()) {
+                                    var id = block.begin >> 1;
+                                    var offset = (prev_id ^ id) & 0xFFFF;
+                                    var target = trace_bits.add(offset)
+                                    const current_value = target.readU16()
+                                    target.writeU16(current_value + 1);
+                                    prev_id = id >> 1;
+                                    //debug("[*] map_offset:", offset, "id:", id, "prev_id:", prev_id, ", target:", target, ", current:", current_value);
+                                }
                             }
                         }
                     }
@@ -253,14 +329,14 @@ Process.enumerateThreads({
         });
     },
     onComplete: function () {
-        console.log("[*] Done stalking threads");
+        debug("[*] Done stalking threads");
     }
 });
 
 Interceptor.attach(Module.getExportByName(null, 'exit'), {
     onEnter: function (args) {
-        console.log("[*] Monitored", block_monitored, "blocks!");
+        debug("[*] Monitored", block_monitored, "blocks!");
         shmdt(trace_bits);
-        console.log("[*] Shared memory unmapped!");
+        debug("[*] Shared memory unmapped!");
     }
 });

@@ -6,3 +6,12 @@ frida.rep/
 ghidra.rep/
 ghidra.gpr
 ghidra.lock
+testcase/
+in/
+out/
+afl.log
+fork.log
+map.txt
+fridamock
+checkfd
+aflmock

@@ -42,7 +42,7 @@ int main(int argc, char* argv[])
     posix_spawnattr_init (&attributes);
     sigemptyset (&signal_mask_set);
     posix_spawnattr_setsigmask (&attributes, &signal_mask_set);
-    short flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK; //| POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_START_SUSPENDED;
+    short flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_START_SUSPENDED;
     posix_spawn_file_actions_adddup2 (&file_actions, 0, 0);
     posix_spawn_file_actions_adddup2 (&file_actions, 1, 1);
     posix_spawn_file_actions_adddup2 (&file_actions, 2, 2);
@@ -53,6 +53,8 @@ int main(int argc, char* argv[])
     int status = posix_spawn(&pid, argv[1], &file_actions, &attributes, myargv, environ);
     if (status == 0) {
         printf("- Child pid: %i\n", pid);
+        kill (pid, SIGCONT);
+        printf("- Child resumed!\n");
         if (waitpid(pid, &status, 0) != -1) {
             printf("- Child exited with status %i\n", status);
         } else {

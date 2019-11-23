@@ -17,9 +17,10 @@ WHITELIST="libplist.3.dylib" frida --no-pause -l afl.js -- /usr/local/bin/plistu
 Will only track `libplist` basic blocks.
 
 ## ToDo's
-* ✓ whitelist modules by name
-* ✓ spawned process should have ASLR disabled 
-* Patch frida to remove the `POSIX_SPAWN_CLOEXEC_DEFAULT` flag when spawning the target binary
+* ✓ Whitelist modules by name
+* ✓ Spawned process should have ASLR disabled 
+* ✓ Patch frida to remove the `POSIX_SPAWN_CLOEXEC_DEFAULT` flag when spawning the target binary and change the flags to the Vala `Subprocess.newv` call to inherit flags from parent.
+* New threads must be also stalked (currently only enumerating threads on process start)
 * Add log to file facility to frida
 * Verify that crashes are actually detected on Mac OS X
 * Improve how the base module is being detected (currently just take the first item from the array of the process's modules)
