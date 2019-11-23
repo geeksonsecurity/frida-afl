@@ -19,7 +19,7 @@ Will only track `libplist` basic blocks.
 ## ToDo's
 * ✓ whitelist modules by name
 * ✓ spawned process should have ASLR disabled 
-* Patch frida to remove the `POSIX_SPAWN_CLOEXEC_DEFAULT` flag when spawning the target binary
+* ✓ Patch frida to remove flags preventing FDs from being inherited ([Pull-Request](https://github.com/frida/frida-core/pull/279))
 * Add log to file facility to frida
 * Verify that crashes are actually detected on Mac OS X
 * Improve how the base module is being detected (currently just take the first item from the array of the process's modules)
