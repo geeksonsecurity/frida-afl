@@ -19,9 +19,9 @@ Will only track `libplist` basic blocks.
 ## ToDo's
 * ✓ Whitelist modules by name
 * ✓ Spawned process should have ASLR disabled 
-* ✓ Patch frida to remove the `POSIX_SPAWN_CLOEXEC_DEFAULT` flag when spawning the target binary and change the flags to the Vala `Subprocess.newv` call to inherit flags from parent.
+* ✓ Patch frida to remove the `POSIX_SPAWN_CLOEXEC_DEFAULT` flag when spawning the target binary and change the flags to the Vala `Subprocess.newv` call to inherit flags from parent. ([Pull-Request](https://github.com/frida/frida-core/pull/279))
 * New threads must be also stalked (currently only enumerating threads on process start)
-* Add log to file facility to frida
+* ✓ Add log to file facility to frida
 * Verify that crashes are actually detected on Mac OS X
 * Improve how the base module is being detected (currently just take the first item from the array of the process's modules)
 * Create afl-fuzz wrapper
