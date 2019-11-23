@@ -2,8 +2,6 @@
 
 ![AFL Status Screen](afl.png "AFL Status Screen")
 
-Use Frida DBI to instrument binary and perform basic-block code coverage that is fed back to AFL.
-
 The `frida-afl.py` scripts spawn the target process with ASLR disabled, inject and execute the `afl.js` script and wait for the execution to finish. If you want to use the forkserver implementation you need to pass the `--entrypoint 0xDEADBEEF` option to the `frida-afl.py` script in order for the instrumented code to start the forkserver at the right place. If you dont want to use the forkserver (**which btw currently doesn't work**), just pass `AFL_NO_FORKSRV=1`.
 
 The env-variable `WHITELIST` should be pass in order to instrument also dynamic libraries used by the target. If none is given only the main module (target binary) will be instrumented. If you use `all` as value, every basic block will be instrumented (no matter which module).
